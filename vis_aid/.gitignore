@@ -7,9 +7,10 @@
 .atom/
 .buildlog/
 .history
+.env
 .svn/
 migrate_working_dir/
-
+config.dart
 # IntelliJ related
 *.iml
 *.ipr

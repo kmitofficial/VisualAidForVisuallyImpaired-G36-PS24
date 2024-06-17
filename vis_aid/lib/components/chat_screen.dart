@@ -2,7 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
-
+import 'config.dart';
 class ChatScreen extends StatefulWidget {
   final File imageFile;
   const ChatScreen({super.key, required this.imageFile});
@@ -27,7 +27,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _initializeModel() async {
     final apiKey =
-        'AIzaSyBWak5ODA95xHBWYkF3QivZWxj0uWBAZPU'; // Replace with your actual API key
+        'apiKey'; // Replace with your actual API key
 
     _model = GenerativeModel(
       model: 'gemini-1.5-flash',
