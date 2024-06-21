@@ -1,10 +1,14 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/components/config.dart';
+import 'package:flutter_application_1/components/conversation_model.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
-import 'config.dart';
+
+
 
 class ChatScreen extends StatefulWidget {
   final File imageFile;
@@ -15,13 +19,13 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final TextEditingController _textController = TextEditingController();
-  final List<Map<String, String>> _messages = [];
+  TextEditingController _textController = TextEditingController();
+  List<Map<String, String>> _messages = [];
   GenerativeModel? _model;
   List<Content> _chatHistory = [];
   late FlutterTts flutterTts;
   late stt.SpeechToText _speechToText;
-  final ScrollController _scrollController = ScrollController();
+  ScrollController _scrollController = ScrollController();
   bool _isListening = false;
 
   @override
@@ -49,7 +53,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     _sendImage();
   }
-  
+
   Future<void> _sendImage() async {
     if (_model == null) return;
 
@@ -62,6 +66,16 @@ class _ChatScreenState extends State<ChatScreen> {
     ];
 
     var response = await _model!.generateContent(_chatHistory);
+
+    final conversation = Conversation(
+      imageUrl: widget.imageFile.path,
+      imageDescription: response.text ?? 'No description available.',
+      messages: [],
+    );
+
+    final conversationRef =
+        FirebaseFirestore.instance.collection('conversations').doc();
+    await conversationRef.set(conversation.toMap());
 
     setState(() {
       _messages.add({
@@ -101,8 +115,37 @@ class _ChatScreenState extends State<ChatScreen> {
       });
     });
 
-    _scrollToBottom();
+    final conversationRef =
+        FirebaseFirestore.instance.collection('conversations').doc();
+    final conversationSnapshot = await conversationRef.get();
+    final conversationData = conversationSnapshot.data();
 
+    if (conversationData != null) {
+      final conversation = Conversation(
+        imageUrl: conversationData['imageUrl'],
+        imageDescription: conversationData['imageDescription'],
+        messages: List<Message>.from(
+          (conversationData['messages'] as List<dynamic>).map(
+            (messageData) => Message(
+              sender: messageData['sender'],
+              text: messageData['text'],
+            ),
+          ),
+        ),
+      );
+
+      conversation.messages.add(
+        Message(sender: 'user', text: message),
+      );
+      conversation.messages.add(
+        Message(
+            sender: 'model', text: response.text ?? 'No response available.'),
+      );
+
+      await conversationRef.set(conversation.toMap());
+    }
+
+    _scrollToBottom();
     await flutterTts.speak(response.text ?? 'No response available.');
   }
 
@@ -134,7 +177,7 @@ class _ChatScreenState extends State<ChatScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollController.animateTo(
         _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
+        duration: Duration(milliseconds: 300),
         curve: Curves.easeOut,
       );
     });
@@ -146,15 +189,15 @@ class _ChatScreenState extends State<ChatScreen> {
         return Align(
           alignment: Alignment.centerRight,
           child: Container(
-            padding: const EdgeInsets.all(16),
-            margin: const EdgeInsets.all(10),
+            padding: EdgeInsets.all(16),
+            margin: EdgeInsets.all(10),
             decoration: BoxDecoration(
               color: Colors.blue,
               borderRadius: BorderRadius.circular(10),
             ),
             child: Text(
               message['message']!,
-              style: const TextStyle(color: Colors.white, fontSize: 18),
+              style: TextStyle(color: Colors.white, fontSize: 18),
             ),
           ),
         );
@@ -162,21 +205,21 @@ class _ChatScreenState extends State<ChatScreen> {
         return Align(
           alignment: Alignment.centerLeft,
           child: Container(
-            padding: const EdgeInsets.all(16),
-            margin: const EdgeInsets.all(10),
+            padding: EdgeInsets.all(16),
+            margin: EdgeInsets.all(10),
             decoration: BoxDecoration(
               color: Colors.grey.shade300,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Text(message['message']!, style: const TextStyle(fontSize: 18)),
+            child: Text(message['message']!, style: TextStyle(fontSize: 18)),
           ),
         );
       case 'image':
         return Align(
           alignment: Alignment.center,
           child: Container(
-            padding: const EdgeInsets.all(16),
-            margin: const EdgeInsets.all(10),
+            padding: EdgeInsets.all(16),
+            margin: EdgeInsets.all(10),
             child: Image.file(
               File(message['message']!),
               semanticLabel: 'Selected image',
@@ -194,7 +237,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Image Chat', style: TextStyle(fontSize: 28)),
+        title: Text('Image Chat', style: TextStyle(fontSize: 28)),
         backgroundColor: Colors.blue,
       ),
       body: Column(
@@ -215,11 +258,11 @@ class _ChatScreenState extends State<ChatScreen> {
                 Expanded(
                   child: TextField(
                     controller: _textController,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText: 'Enter your message',
                       border: OutlineInputBorder(),
                     ),
-                    style: const TextStyle(fontSize: 18),
+                    style: TextStyle(fontSize: 18),
                     onSubmitted: (value) {
                       _sendMessage(value);
                       _textController.clear();
@@ -227,7 +270,8 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                 ),
                 IconButton(
-                  icon: Icon(_isListening ? Icons.mic_off : Icons.mic, size: 36),
+                  icon:
+                      Icon(_isListening ? Icons.mic_off : Icons.mic, size: 36),
                   onPressed: _isListening ? _stopListening : _startListening,
                   tooltip: _isListening ? 'Stop listening' : 'Start listening',
                 ),
