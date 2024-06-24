@@ -8,11 +8,10 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
-
-
 class ChatScreen extends StatefulWidget {
   final File imageFile;
-  const ChatScreen({super.key, required this.imageFile});
+  final String? conversationId;
+  const ChatScreen({super.key, required this.imageFile, this.conversationId});
 
   @override
   _ChatScreenState createState() => _ChatScreenState();
@@ -27,6 +26,7 @@ class _ChatScreenState extends State<ChatScreen> {
   late stt.SpeechToText _speechToText;
   ScrollController _scrollController = ScrollController();
   bool _isListening = false;
+  String? _conversationId;
 
   @override
   void initState() {
@@ -34,6 +34,12 @@ class _ChatScreenState extends State<ChatScreen> {
     _initializeModel();
     flutterTts = FlutterTts();
     _speechToText = stt.SpeechToText();
+    _conversationId = widget.conversationId;
+    if (_conversationId != null) {
+      _loadExistingConversation();
+    } else {
+      _sendImage();
+    }
   }
 
   @override
@@ -50,8 +56,35 @@ class _ChatScreenState extends State<ChatScreen> {
       apiKey: apiKey,
       generationConfig: GenerationConfig(maxOutputTokens: 100),
     );
+  }
 
-    _sendImage();
+  Future<void> _loadExistingConversation() async {
+    if (_conversationId == null) return;
+
+    final conversationDoc = await FirebaseFirestore.instance
+        .collection('conversations')
+        .doc(_conversationId)
+        .get();
+
+    if (!conversationDoc.exists) return;
+
+    final conversationData = conversationDoc.data() as Map<String, dynamic>;
+    final conversation = Conversation.fromMap(conversationData);
+
+    setState(() {
+      _messages = conversation.messages
+          .map((message) => {
+                'type': message.sender == 'user' ? 'user' : 'response',
+                'message': message.text,
+              })
+          .toList();
+      _messages.insert(0, {
+        'type': 'image',
+        'message': conversation.imageUrl,
+      });
+    });
+
+    _scrollToBottom();
   }
 
   Future<void> _sendImage() async {
@@ -70,12 +103,18 @@ class _ChatScreenState extends State<ChatScreen> {
     final conversation = Conversation(
       imageUrl: widget.imageFile.path,
       imageDescription: response.text ?? 'No description available.',
-      messages: [],
+      messages: [
+        Message(
+            sender: 'model',
+            text: response.text ?? 'No description available.'),
+      ],
+      timestamp: DateTime.now(),
     );
 
-    final conversationRef =
-        FirebaseFirestore.instance.collection('conversations').doc();
-    await conversationRef.set(conversation.toMap());
+    final conversationRef = await FirebaseFirestore.instance
+        .collection('conversations')
+        .add(conversation.toMap());
+    _conversationId = conversationRef.id;
 
     setState(() {
       _messages.add({
@@ -115,34 +154,22 @@ class _ChatScreenState extends State<ChatScreen> {
       });
     });
 
-    final conversationRef =
-        FirebaseFirestore.instance.collection('conversations').doc();
-    final conversationSnapshot = await conversationRef.get();
-    final conversationData = conversationSnapshot.data();
-
-    if (conversationData != null) {
-      final conversation = Conversation(
-        imageUrl: conversationData['imageUrl'],
-        imageDescription: conversationData['imageDescription'],
-        messages: List<Message>.from(
-          (conversationData['messages'] as List<dynamic>).map(
-            (messageData) => Message(
-              sender: messageData['sender'],
-              text: messageData['text'],
-            ),
-          ),
-        ),
-      );
-
-      conversation.messages.add(
-        Message(sender: 'user', text: message),
-      );
-      conversation.messages.add(
-        Message(
-            sender: 'model', text: response.text ?? 'No response available.'),
-      );
-
-      await conversationRef.set(conversation.toMap());
+    if (_conversationId != null) {
+      await FirebaseFirestore.instance
+          .collection('conversations')
+          .doc(_conversationId)
+          .update({
+        'messages': FieldValue.arrayUnion([
+          {
+            'sender': 'user',
+            'text': message,
+          },
+          {
+            'sender': 'model',
+            'text': response.text ?? 'No response available.',
+          },
+        ]),
+      });
     }
 
     _scrollToBottom();

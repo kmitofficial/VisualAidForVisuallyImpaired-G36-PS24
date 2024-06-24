@@ -21,6 +21,7 @@ class _ImagePickerScreenState extends State<ImagePickerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color.fromARGB(255, 247, 247, 247),
       appBar: AppBar(
         title: const Text(
           'Gallery and Camera Access',
