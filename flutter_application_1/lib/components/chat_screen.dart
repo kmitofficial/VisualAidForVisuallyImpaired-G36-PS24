@@ -2,11 +2,11 @@ import 'dart:async';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_application_1/components/config.dart';
 import 'package:flutter_application_1/components/conversation_model.dart';
 import 'package:flutter_tts/flutter_tts.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class ChatScreen extends StatefulWidget {
   final File imageFile;
@@ -20,21 +20,21 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   TextEditingController _textController = TextEditingController();
   List<Map<String, String>> _messages = [];
-  GenerativeModel? _model;
-  List<Content> _chatHistory = [];
   late FlutterTts flutterTts;
   late stt.SpeechToText _speechToText;
   ScrollController _scrollController = ScrollController();
   bool _isListening = false;
   String? _conversationId;
+  File? _currentImage;
+  bool _imageSent = false;
 
   @override
   void initState() {
     super.initState();
-    _initializeModel();
     flutterTts = FlutterTts();
     _speechToText = stt.SpeechToText();
     _conversationId = widget.conversationId;
+    _currentImage = widget.imageFile;
     if (_conversationId != null) {
       _loadExistingConversation();
     } else {
@@ -46,16 +46,6 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _stopListening();
     super.dispose();
-  }
-
-  Future<void> _initializeModel() async {
-    final apiKey = ApiKey.key;
-
-    _model = GenerativeModel(
-      model: 'gemini-1.5-flash',
-      apiKey: apiKey,
-      generationConfig: GenerationConfig(maxOutputTokens: 100),
-    );
   }
 
   Future<void> _loadExistingConversation() async {
@@ -82,32 +72,27 @@ class _ChatScreenState extends State<ChatScreen> {
         'type': 'image',
         'message': conversation.imageUrl,
       });
+      _imageSent = true;
     });
 
     _scrollToBottom();
   }
 
   Future<void> _sendImage() async {
-    if (_model == null) return;
+    setState(() {
+      _messages.add({
+        'type': 'image',
+        'message': _currentImage!.path,
+      });
+      _imageSent = true;
+    });
 
-    final imageBytes = await widget.imageFile.readAsBytes();
-    final prompt = TextPart("Describe the image.");
-    final imagePart = DataPart('image/jpeg', imageBytes);
-
-    _chatHistory = [
-      Content.multi([prompt, imagePart])
-    ];
-
-    var response = await _model!.generateContent(_chatHistory);
+    _scrollToBottom();
 
     final conversation = Conversation(
-      imageUrl: widget.imageFile.path,
-      imageDescription: response.text ?? 'No description available.',
-      messages: [
-        Message(
-            sender: 'model',
-            text: response.text ?? 'No description available.'),
-      ],
+      imageUrl: _currentImage!.path,
+      imageDescription: '',
+      messages: [],
       timestamp: DateTime.now(),
     );
 
@@ -115,25 +100,10 @@ class _ChatScreenState extends State<ChatScreen> {
         .collection('conversations')
         .add(conversation.toMap());
     _conversationId = conversationRef.id;
-
-    setState(() {
-      _messages.add({
-        'type': 'image',
-        'message': widget.imageFile.path,
-      });
-      _messages.add({
-        'type': 'response',
-        'message': response.text ?? 'No description available.',
-      });
-    });
-
-    _scrollToBottom();
-
-    await flutterTts.speak(response.text ?? 'No description available.');
   }
 
   Future<void> _sendMessage(String message) async {
-    if (message.isEmpty || _model == null) return;
+    if (message.isEmpty) return;
 
     setState(() {
       _messages.add({
@@ -142,15 +112,14 @@ class _ChatScreenState extends State<ChatScreen> {
       });
     });
 
-    var userMessage = Content.text(message);
-    _chatHistory.add(userMessage);
+    _scrollToBottom();
 
-    var response = await _model!.generateContent(_chatHistory);
+    String response = await _getVQAResponse(message, _currentImage!);
 
     setState(() {
       _messages.add({
         'type': 'response',
-        'message': response.text ?? 'No response available.',
+        'message': response,
       });
     });
 
@@ -166,14 +135,29 @@ class _ChatScreenState extends State<ChatScreen> {
           },
           {
             'sender': 'model',
-            'text': response.text ?? 'No response available.',
+            'text': response,
           },
         ]),
       });
     }
 
     _scrollToBottom();
-    await flutterTts.speak(response.text ?? 'No response available.');
+    await flutterTts.speak(response);
+  }
+
+  Future<String> _getVQAResponse(String question, File image) async {
+    var request = http.MultipartRequest('POST', Uri.parse('http://10.0.2.2:5000/vqa'));
+    request.fields['question'] = question;
+    request.files.add(await http.MultipartFile.fromPath('image', image.path));
+
+    var response = await request.send();
+    if (response.statusCode == 200) {
+      var responseData = await response.stream.bytesToString();
+      var decodedResponse = json.decode(responseData);
+      return decodedResponse['answer'];
+    } else {
+      return 'Error: ${response.statusCode}';
+    }
   }
 
   Future<void> _startListening() async {
@@ -202,11 +186,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
     });
   }
 
@@ -291,15 +277,16 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                     style: TextStyle(fontSize: 18),
                     onSubmitted: (value) {
-                      _sendMessage(value);
-                      _textController.clear();
+                      if (_imageSent) {
+                        _sendMessage(value);
+                        _textController.clear();
+                      }
                     },
                   ),
                 ),
                 IconButton(
-                  icon:
-                      Icon(_isListening ? Icons.mic_off : Icons.mic, size: 36),
-                  onPressed: _isListening ? _stopListening : _startListening,
+                  icon: Icon(_isListening ? Icons.mic_off : Icons.mic, size: 36),
+                  onPressed: _imageSent ? (_isListening ? _stopListening : _startListening) : null,
                   tooltip: _isListening ? 'Stop listening' : 'Start listening',
                 ),
               ],
