@@ -63,6 +63,10 @@ Follow these steps to set up and run the project on your local machine.
 
    Note: These rules are set to expire on July 18, 2024. Make sure to update them before that date.
 
+### Setup the flask server
+
+1. Run the image_model.py and let the flask server go live
+
 ### Running the App
 
 1. Start an Android emulator or connect a physical device.
