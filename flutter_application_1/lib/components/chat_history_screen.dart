@@ -34,6 +34,73 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
     });
   }
 
+  Future<void> _deleteConversation(String? conversationId) async {
+    if (conversationId == null) {
+      print('Error: Conversation ID is null');
+      return;
+    }
+    await FirebaseFirestore.instance
+        .collection('conversations')
+        .doc(conversationId)
+        .delete();
+    _getConversations(); // Refresh the list after deletion
+  }
+
+  Widget _buildImageWidget(String imageUrl) {
+    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+      // Network image
+      return Image.network(
+        imageUrl,
+        width: 60,
+        height: 60,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          return Container(
+            width: 60,
+            height: 60,
+            color: Colors.grey[300],
+            child: Icon(Icons.error, color: Colors.red),
+          );
+        },
+      );
+    } else {
+      // Local file
+      final file = File(imageUrl);
+      if (file.existsSync()) {
+        return Image.file(
+          file,
+          width: 60,
+          height: 60,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            return Container(
+              width: 60,
+              height: 60,
+              color: Colors.grey[300],
+              child: Icon(Icons.error, color: Colors.red),
+            );
+          },
+        );
+      } else {
+        // If file doesn't exist, try to load from assets
+        return Image.asset(
+          imageUrl,
+          width: 60,
+          height: 60,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            return Container(
+              width: 60,
+              height: 60,
+              color: Colors.grey[300],
+              child: Icon(Icons.error, color: Colors.red),
+            );
+          },
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -57,12 +124,7 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
               child: ExpansionTile(
                 leading: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: Image.file(
-                    File(conversation.imageUrl),
-                    width: 60,
-                    height: 60,
-                    fit: BoxFit.cover,
-                  ),
+                  child: _buildImageWidget(conversation.imageUrl),
                 ),
                 title: Text(
                   conversation.imageDescription,
@@ -92,25 +154,71 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
                       )),
                   Padding(
                     padding: const EdgeInsets.all(16.0),
-                    child: ElevatedButton(
-                      child: Text('Continue this conversation'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color.fromARGB(255, 0, 0, 0),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => ChatScreen(
-                              imageFile: File(conversation.imageUrl),
-                              conversationId: conversation.id,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        ElevatedButton(
+                          child: Text(
+                            'Continue this conversation',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.lightBlue,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
                             ),
                           ),
-                        );
-                      },
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => ChatScreen(
+                                  imageFile: File(conversation.imageUrl),
+                                  conversationId: conversation.id,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        ElevatedButton(
+                          child: Text(
+                            'Delete',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          onPressed: () {
+                            showDialog(
+                              context: context,
+                              builder: (BuildContext context) {
+                                return AlertDialog(
+                                  title: Text("Delete Conversation"),
+                                  content: Text("Are you sure you want to delete this conversation?"),
+                                  actions: [
+                                    TextButton(
+                                      child: Text("Cancel"),
+                                      onPressed: () {
+                                        Navigator.of(context).pop();
+                                      },
+                                    ),
+                                    TextButton(
+                                      child: Text("Delete"),
+                                      onPressed: () {
+                                        _deleteConversation(conversation.id);
+                                        Navigator.of(context).pop();
+                                      },
+                                    ),
+                                  ],
+                                );
+                              },
+                            );
+                          },
+                        ),
+                      ],
                     ),
                   ),
                 ],
