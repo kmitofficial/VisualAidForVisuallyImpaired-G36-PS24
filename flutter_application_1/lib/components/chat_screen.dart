@@ -23,10 +23,13 @@ class _ChatScreenState extends State<ChatScreen> {
   late FlutterTts flutterTts;
   late stt.SpeechToText _speechToText;
   ScrollController _scrollController = ScrollController();
+  stt.SpeechToText _speech = stt.SpeechToText();
   bool _isListening = false;
   String? _conversationId;
   File? _currentImage;
   bool _imageSent = false;
+  int _tapCount = 0;
+  Timer? _tapTimer;
 
   @override
   void initState() {
@@ -45,6 +48,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _stopListening();
+    _tapTimer?.cancel();
     super.dispose();
   }
 
@@ -112,6 +116,7 @@ class _ChatScreenState extends State<ChatScreen> {
       });
     });
 
+    _textController.clear();
     _scrollToBottom();
 
     String response = await _getVQAResponse(message, _currentImage!);
@@ -170,13 +175,16 @@ class _ChatScreenState extends State<ChatScreen> {
         onResult: (result) async {
           if (result.finalResult) {
             String recognizedWords = result.recognizedWords;
-            await _sendMessage(recognizedWords);
+            if (recognizedWords.isNotEmpty) {
+              await _sendMessage(recognizedWords);
+            }
+            await _stopListening();  // Stop listening after sending the message
           }
         },
       );
     }
   }
-
+  
   Future<void> _stopListening() async {
     await _speechToText.stop();
     setState(() {
@@ -246,6 +254,54 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  void _listen() async {
+    if (!_isListening) {
+      bool available = await _speech.initialize(
+        onStatus: (status) => print('onStatus: $status'),
+        onError: (errorNotification) => print('onError: $errorNotification'),
+      );
+      if (available) {
+        setState(() => _isListening = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Listening...')),
+        );
+        _speech.listen(
+          onResult: (result) {
+            if (result.finalResult) {
+              _sendMessage(result.recognizedWords);
+              setState(() => _isListening = false);
+              _speech.stop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Stopped listening')),
+              );
+            }
+          },
+        );
+      }
+    } else {
+      setState(() => _isListening = false);
+      _speech.stop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Stopped listening')),
+      );
+    }
+  }
+
+  void _handleTap() {
+    _tapCount++;
+    if (_tapCount == 1) {
+      _tapTimer = Timer(Duration(milliseconds: 500), () {
+        _tapCount = 0;
+      });
+    } else if (_tapCount == 3) {
+      _tapCount = 0;
+      _tapTimer?.cancel();
+      if (_imageSent) {
+        _listen();
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -253,46 +309,45 @@ class _ChatScreenState extends State<ChatScreen> {
         title: Text('Image Chat', style: TextStyle(fontSize: 28)),
         backgroundColor: Colors.blue,
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              itemCount: _messages.length,
-              itemBuilder: (context, index) {
-                return _buildMessageBubble(_messages[index]);
-              },
+      body: GestureDetector(
+        onTap: _handleTap,
+        behavior: HitTestBehavior.opaque,
+        child: Column(
+          children: [
+            Expanded(
+              child: ListView.builder(
+                controller: _scrollController,
+                itemCount: _messages.length,
+                itemBuilder: (context, index) {
+                  return _buildMessageBubble(_messages[index]);
+                },
+              ),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _textController,
-                    decoration: InputDecoration(
-                      hintText: 'Enter your message',
-                      border: OutlineInputBorder(),
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _textController,
+                      decoration: InputDecoration(
+                        hintText: 'Enter your message',
+                        border: OutlineInputBorder(),
+                      ),
+                      style: TextStyle(fontSize: 18),
+                      onSubmitted: (value) {
+                        if (_imageSent) {
+                          _sendMessage(value);
+                          _textController.clear();
+                        }
+                      },
                     ),
-                    style: TextStyle(fontSize: 18),
-                    onSubmitted: (value) {
-                      if (_imageSent) {
-                        _sendMessage(value);
-                        _textController.clear();
-                      }
-                    },
                   ),
-                ),
-                IconButton(
-                  icon: Icon(_isListening ? Icons.mic_off : Icons.mic, size: 36),
-                  onPressed: _imageSent ? (_isListening ? _stopListening : _startListening) : null,
-                  tooltip: _isListening ? 'Stop listening' : 'Start listening',
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
